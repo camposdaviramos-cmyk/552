@@ -3,6 +3,7 @@
 import json
 import runpy
 import tempfile
+import tomllib
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -40,8 +41,22 @@ def test_local_import_preserves_factory_defaults(monkeypatch):
     factory.assert_called_once_with({})
 
 
-def test_vercel_rewrites():
+def test_vercel_preserves_flask_routes():
     config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-    assert config == {
-        "rewrites": [{"source": "/(.*)", "destination": "/run.py"}]
+    assert config["framework"] == "flask"
+    assert not config.get("rewrites")
+    assert not config.get("builds")
+    assert not config.get("routes")
+
+
+def test_vercel_project_declares_runtime_dependencies():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    requirements = {
+        line.strip() for line in (ROOT / "requirements.txt").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
     }
+    assert project["project"]["name"]
+    assert project["project"]["version"]
+    assert project["project"]["requires-python"] == ">=3.12"
+    assert set(project["project"]["dependencies"]) == requirements
+    assert project["tool"]["vercel"]["entrypoint"] == "run:app"

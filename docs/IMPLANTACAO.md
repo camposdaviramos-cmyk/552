@@ -37,11 +37,24 @@ O TR exige implantação inicial em até 30 dias corridos a partir da Ordem de S
 
 ## Entrada serverless na Vercel
 
-`vercel.json` encaminha as requisições para `/run.py` usando `rewrites`.
+`vercel.json` seleciona o framework Flask e mantém os caminhos originais das
+requisições. Não deve existir um rewrite global para `/run.py`: no roteamento
+atual de backends, esse destino substitui o caminho recebido pelo Flask.
 `pyproject.toml` declara `run:app` como entrada personalizada do Flask, conforme
 a [documentação da Vercel](https://vercel.com/docs/frameworks/backend/flask).
-As dependências continuam em `requirements.txt`. Importar `run.py` expõe a
+O instalador da Vercel usa a seção `[project]` de `pyproject.toml`, que contém
+nome, versão, versão mínima do Python e todas as dependências de execução.
+`requirements.txt` mantém as mesmas versões para a instalação local/Docker;
+ao atualizar dependências, sincronize os dois arquivos e execute `uv lock`
+para atualizar o `uv.lock` versionado. `.python-version`
+seleciona Python 3.12 na Vercel. Importar `run.py` expõe a
 aplicação WSGI sem iniciar o Waitress; o servidor local só inicia com execução direta.
+
+Validação da correção do build: instalação limpa com `uv sync --python 3.12
+--no-dev` concluída em Windows/Python 3.12.14; importação de `run.py` com
+`VERCEL=1` e respostas HTTP 200 para `/`, `/api/health`, `/api/session`,
+`/static/app.js` e `/static/styles.css`. Quatro testes de entrada/configuração
+passaram. Essa verificação não substitui o build e a execução na Vercel.
 
 Quando `VERCEL=1`, a aplicação usa `/tmp/integra-saude` para SQLite e chaves
 geradas, evitando escrever no pacote somente leitura. Esse armazenamento é
