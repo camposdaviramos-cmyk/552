@@ -71,7 +71,9 @@ py -m venv .venv
 .\.venv\Scripts\python.exe run.py
 ```
 
-A carga é idempotente: não altera a base se já existir algum usuário. O servidor utiliza Waitress, sem modo de debug, e escuta apenas no endereço local por padrão.
+Ao iniciar `run.py` (inclusive via importação WSGI ou Docker no Render), a aplicação cria as tabelas e executa automaticamente o seed antes de atender requisições. Não é necessário acessar o Shell nem configurar um Build Command. O arquivo `seed.py` é incluído na imagem Docker.
+
+A carga é idempotente: não altera a base se já existir algum usuário. O seed automático respeita `APP_DEMO`, habilitado por padrão (`1`); use `APP_DEMO=0` para desativá-lo. O comando manual `python seed.py --demo` continua disponível. O servidor utiliza Waitress, sem modo de debug, e escuta apenas no endereço local por padrão.
 
 ## Testes
 

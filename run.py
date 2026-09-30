@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from saude.app import create_app
+from seed import seed
 
 # Vercel's application bundle is read-only. SQLite here is temporary and
 # isolated per function instance; production persistence needs external storage.
@@ -13,6 +14,10 @@ if os.environ.get("VERCEL") == "1":
     config["INSTANCE"] = str(Path(tempfile.gettempdir()) / "integra-saude")
 
 app = create_app(config)
+
+# Initialize demo data before either Waitress or a WSGI host serves requests.
+if app.config["DEMO"]:
+    seed(app)
 
 if os.environ.get("VERCEL") == "1":
     app.logger.warning(

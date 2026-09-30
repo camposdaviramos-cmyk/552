@@ -14,7 +14,11 @@ def cpf_for(number):
 
 def seed(app):
     with app.app_context():
+        # Serialize the check and inserts if multiple processes start together.
+        # Closing this context rolls back any incomplete seed on failure.
+        db().execute("BEGIN IMMEDIATE")
         if db().execute("SELECT COUNT(*) FROM users").fetchone()[0]:
+            db().rollback()
             print("Base já inicializada. Nenhum dado foi alterado.")
             return
         today=date.today(); rng=random.Random(42)
