@@ -1,0 +1,39 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_DEMO: "0"
+      HTTPS_ONLY: "1"
+    volumes:
+      - saude_data:/app/instance
+    expose:
+      - "8080"
+  backup:
+    build: .
+    restart: unless-stopped
+    command: ["python", "backup.py", "--watch", "--interval", "3600", "--retain", "168"]
+    environment:
+      APP_DEMO: "0"
+    volumes:
+      - saude_data:/app/instance
+    depends_on:
+      app:
+        condition: service_healthy
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Defina o domínio da implantação}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  saude_data:
+  caddy_data:

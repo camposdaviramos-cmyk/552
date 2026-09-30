@@ -1,0 +1,8 @@
+.venv
+instance
+artifacts
+.git
+__pycache__
+.pytest_cache
+TR.pdf
+docs/paginas
