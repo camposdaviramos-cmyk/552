@@ -51,7 +51,7 @@ async function api(path,options={}){
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const response=await fetch('/api'+path,{...requestOptions,headers,signal:controller.signal});
+    const response=await fetch('/api'+path,{...requestOptions,credentials:'include',headers,signal:controller.signal});
     if(response.status===401 && path!='/login'){state.user=null;renderLogin();}
     const data=await response.json().catch(error=>{if(controller.signal.aborted)throw error;throw new Error('O servidor retornou uma resposta inválida. Tente novamente.');});
     if(!response.ok)throw new Error(data.error||'Não foi possível completar a operação.');
@@ -71,7 +71,7 @@ function renderLogin(){
   const setTab=()=>document.querySelectorAll('[data-login]').forEach(b=>b.classList.toggle('selected',b.dataset.login===(citizen?'citizen':'team')));setTab();
   document.querySelectorAll('[data-login]').forEach(b=>b.onclick=()=>{citizen=b.dataset.login==='citizen';setTab();});
   $('#demo-access')?.addEventListener('click',()=>{$('[name=username]').value=citizen?'cidadao':'admin';$('[name=password]').value='Demo@Saude2026!';$('#login-form').requestSubmit();});
-  $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('button[type=submit]',e.target);button.disabled=true;$('#login-error').textContent='';try{const data=await api('/login',{method:'POST',body:Object.fromEntries(new FormData(e.target))});state.csrf=data.csrf;state.user=data.user;await enterApp();}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
+  $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('button[type=submit]',e.target);button.disabled=true;$('#login-error').textContent='';try{const sessionData=await api('/session');state.csrf=sessionData.csrf;const data=await api('/login',{method:'POST',body:Object.fromEntries(new FormData(e.target))});state.csrf=data.csrf;state.user=data.user;await enterApp();}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
 }
 function shell(){
   const managerial=['admin','gestor'].includes(state.user.role);

@@ -31,6 +31,68 @@ def login(client,username="admin"):
     assert response.status_code==200
     return {'X-CSRF-Token':response.json['csrf']}
 
+@pytest.mark.parametrize("origin", [
+    "https://552-blue.vercel.app",
+    "https://552-8x8574vka-dev-spacey1.vercel.app",
+])
+def test_cross_origin_session_flow(app, origin):
+    client = app.test_client()
+
+    def request(method, path, **kwargs):
+        headers = {"Origin": origin, **kwargs.pop("headers", {})}
+        response = client.open(path, method=method, base_url="https://five52-9ftx.onrender.com", headers=headers, **kwargs)
+        assert response.headers["Access-Control-Allow-Origin"] == origin
+        assert response.headers["Access-Control-Allow-Credentials"] == "true"
+        assert "Origin" in response.vary
+        assert response.headers["Cache-Control"] == "no-store"
+        return response
+
+    response = request("GET", "/api/session")
+    cookie = response.headers["Set-Cookie"]
+    assert all(flag in cookie for flag in ("SameSite=None", "Secure", "HttpOnly"))
+    assert "Domain=" not in cookie
+    assert app.config["REMEMBER_COOKIE_SAMESITE"] == "None"
+    assert app.config["REMEMBER_COOKIE_SECURE"] is True
+    csrf = response.json["csrf"]
+    credentials = {"username": "admin", "password": "Test@Password2026"}
+    assert request("POST", "/api/login", json=credentials).status_code == 403
+    response = request("POST", "/api/login", json=credentials, headers={"X-CSRF-Token": csrf})
+    assert response.status_code == 200
+    csrf = response.json["csrf"]
+    assert request("GET", "/api/meta").status_code == 200
+    assert request("GET", "/api/session").json["user"]["username"] == "admin"
+    assert request("POST", "/api/logout", headers={"X-CSRF-Token": "invalid"}).status_code == 403
+    assert request("POST", "/api/logout", headers={"X-CSRF-Token": csrf}).status_code == 200
+    assert request("GET", "/api/meta").status_code == 401
+    csrf = request("GET", "/api/session").json["csrf"]
+    assert request("POST", "/api/login", json=credentials, headers={"X-CSRF-Token": csrf}).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/api/session", "/api/login", "/api/logout", "/api/patients"])
+def test_cors_preflight_needs_no_session(app, path):
+    response = app.test_client().options(path, headers={
+        "Origin": "https://552-blue.vercel.app",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type, X-CSRF-Token",
+    })
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Credentials"] == "true"
+    assert "POST" in response.headers["Access-Control-Allow-Methods"]
+    assert "X-CSRF-Token" in response.headers["Access-Control-Allow-Headers"]
+    assert "Set-Cookie" not in response.headers
+
+
+@pytest.mark.parametrize("origin", ["https://untrusted.example", "https://552-blue.vercel.app.evil.example", "null"])
+def test_cors_does_not_allow_other_origins(app, origin):
+    client = app.test_client()
+    for response in (
+        client.get("/api/session", headers={"Origin": origin}),
+        client.options("/api/login", headers={"Origin": origin, "Access-Control-Request-Method": "POST"}),
+    ):
+        assert "Access-Control-Allow-Origin" not in response.headers
+        assert "Access-Control-Allow-Credentials" not in response.headers
+
+
 def patient(number=99):
     return dict(name="Novo Paciente",birth_date="1990-03-15",cpf=cpf_for(700000000+number),cns="")
 

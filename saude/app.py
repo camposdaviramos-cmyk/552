@@ -12,6 +12,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 from flask import Flask, Response, g, jsonify, request, send_from_directory, session
+from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .catalog import MODULES, ROLE_LABELS, can_access
@@ -35,6 +36,25 @@ def create_app(config=None):
     app.config.update(SECRET_KEY=os.environ.get("SECRET_KEY",keys["session"]), DATABASE=str(instance / "saude.db"), INSTANCE=str(instance), HASH_KEY=bytes.fromhex(keys["hash"]), SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("HTTPS_ONLY")=="1", PERMANENT_SESSION_LIFETIME=timedelta(minutes=30), MAX_CONTENT_LENGTH=2*1024*1024, DEMO=os.environ.get("APP_DEMO","1")=="1")
     if config:
         app.config.update(config)
+    app.config.update(
+        SESSION_COOKIE_SAMESITE="None",
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        REMEMBER_COOKIE_SAMESITE="None",
+        REMEMBER_COOKIE_SECURE=True,
+    )
+    CORS(
+        app,
+        resources={r"/api/.*": {}},
+        supports_credentials=True,
+        origins=[
+            "https://552-blue.vercel.app",
+            "https://552-8x8574vka-dev-spacey1.vercel.app",
+        ],
+        allow_headers=["Content-Type", "X-CSRF-Token"],
+        methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        always_send=False,
+    )
     app.extensions["cipher"] = Fernet(os.environ.get("DATA_KEY",keys["encryption"]).encode())
 
     @app.teardown_appcontext
@@ -59,6 +79,9 @@ def create_app(config=None):
     @app.before_request
     def protect():
         if not request.path.startswith("/api/"):
+            return
+        # Preflight requests carry no session cookie or CSRF token.
+        if request.method == "OPTIONS":
             return
         if request.method in ("POST","PATCH","PUT") and request.is_json and not isinstance(request.get_json(silent=True),dict):
             return jsonify(error="O corpo JSON deve ser um objeto."),400

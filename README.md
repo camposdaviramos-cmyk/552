@@ -75,6 +75,14 @@ Ao iniciar `run.py` (inclusive via importação WSGI ou Docker no Render), a apl
 
 A carga é idempotente: não altera a base se já existir algum usuário. O seed automático respeita `APP_DEMO`, habilitado por padrão (`1`); use `APP_DEMO=0` para desativá-lo. O comando manual `python seed.py --demo` continua disponível. O servidor utiliza Waitress, sem modo de debug, e escuta apenas no endereço local por padrão.
 
+## Sessões entre Vercel e Render
+
+As rotas `/api/*` permitem CORS com credenciais apenas para `https://552-blue.vercel.app` e `https://552-8x8574vka-dev-spacey1.vercel.app`. O cookie de sessão usa `SameSite=None; Secure; HttpOnly`; as opções de remember cookie usam `SameSite=None` e `Secure` (a aplicação não usa Flask-Login atualmente). O acesso requer HTTPS.
+
+O cliente deve buscar `/api/session` com `credentials: 'include'`, guardar o campo `csrf` e enviá-lo em `X-CSRF-Token` nos pedidos de alteração, incluindo login. O login devolve um novo token, que deve substituir o anterior. O frontend incluído envia credenciais e consulta a sessão antes de cada login. Pedidos `OPTIONS` não exigem sessão; os pedidos efetivos continuam protegidos por autenticação e CSRF.
+
+As URLs do frontend deste repositório continuam relativas (`/api`): elas precisam chegar ao mesmo backend que emitiu a sessão. Caso o frontend separado chame o Render diretamente, use `https://five52-9ftx.onrender.com/api` em todas as chamadas e mantenha `credentials: 'include'`. A configuração CORS não redireciona essas URLs. Configure uma `SECRET_KEY` fixa no ambiente do backend e compartilhada entre réplicas para preservar a validade das sessões após reinícios. Navegadores que bloqueiam cookies de terceiros podem exigir um proxy de API no domínio do frontend.
+
 ## Testes
 
 ```powershell

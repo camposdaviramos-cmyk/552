@@ -85,7 +85,7 @@ let citizenEvents=null,citizenRevision='',citizenRefreshPending=false,installPro
 function stopCitizenEvents(){citizenEvents?.close();citizenEvents=null;citizenRevision='';}
 function startCitizenEvents(){
   if(citizenEvents||state.user?.role!=='cidadao'||document.hidden)return;
-  citizenEvents=new EventSource('/api/citizen/events');
+  citizenEvents=new EventSource('/api/citizen/events',{withCredentials:true});
   citizenEvents.addEventListener('refresh',event=>{
     if(citizenRevision!==event.lastEventId){if($('#modal').open)citizenRefreshPending=true;else renderCitizen();}
     citizenRevision=event.lastEventId;
