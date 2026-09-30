@@ -13,6 +13,34 @@
 @media(max-width:760px){.stat-top{font-size:10px}.stat-caption{font-size:9px}.agenda-card td{font-size:10px}.person-cell strong{font-size:11px}.badge{font-size:9px}}
 
 /* Login: tela inteira, independente do espaçamento da área interna. */
+[hidden]{display:none!important}
+.odontogram{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:16px}
+.odontogram fieldset{padding:12px;border:1px solid var(--line);border-radius:8px}
+.odontogram legend{font-size:12px;font-weight:600}
+.odontogram label{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:8px;margin-bottom:6px}
+.odontogram select{min-width:0;width:100%}
+.record-action-buttons,.analytics-filters{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0;align-items:end}
+.record-action-buttons:empty{display:none}
+.attachment-list{padding-left:20px;line-height:1.9;overflow-wrap:anywhere}
+.attachment-list small{display:block;font-family:monospace;font-size:9px}
+#record-tools{margin-top:24px;border-top:1px solid var(--line);padding-top:20px}
+.history-entry{padding:12px 0;border-bottom:1px solid var(--line)}
+details{margin:12px 0}summary{cursor:pointer;font-weight:600}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}
+dt{font-weight:600;margin-top:12px}dd{margin:5px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.report-section{margin:24px 0}.analytics-bar{display:grid;grid-template-columns:minmax(140px,1fr) 2fr 50px;gap:16px;align-items:center;margin-top:14px}
+.analytics-bar meter{width:100%;height:18px}
+.compliance-external{background:#fff1f2!important;color:#9f1239}
+.compliance-external td:first-child{border-left:4px solid #dc2626}
+.compliance-external .badge{background:#fee2e2;color:#991b1b}
+.compliance-local .badge{background:#dcfce7;color:#166534}
+.compliance-table small{display:block;line-height:1.6;margin-top:8px}
+.compliance-filters{display:flex;gap:12px;margin:20px 0;flex-wrap:wrap}
+.compliance-filters input{flex:1;min-width:180px}
+.print-report p{overflow-wrap:anywhere}
+.manual{max-width:900px;margin:auto;padding:32px 24px;background:white;font-size:15px;line-height:1.8}.manual h1{margin:20px 0}.manual h2{font-size:22px;margin:32px 0 12px}.manual li{margin-bottom:14px}.manual a{color:#1d4ed8;text-decoration:underline}.manual nav{margin:24px 0}
+@media(max-width:760px){.odontogram{grid-template-columns:1fr}.analytics-bar{grid-template-columns:minmax(90px,1fr) 1fr 35px;gap:8px}.analytics-filters label{flex:1;min-width:130px}.citizen-header{flex-wrap:wrap;gap:10px;padding-bottom:15px}}
+@media print{body:has(dialog[open]) #app,body:has(dialog[open]) .skip-link,body:has(dialog[open]) #toast{display:none}dialog[open]{position:static;max-width:none;max-height:none;width:100%;border:0;box-shadow:none;overflow:visible}dialog[open] .modal-header,dialog[open] button{display:none}dialog::backdrop{background:none}.modal-body{padding:0}}
 #main.login-layout {
   --teal: #2563eb;
   --teal-dark: #1d4ed8;

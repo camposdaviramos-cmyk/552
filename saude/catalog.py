@@ -51,5 +51,63 @@ MODULES = {
 
 ROLE_LABELS = {"admin":"Administrador", "gestor":"Gestor municipal", "clinico":"Profissional assistencial", "recepcao":"Recepção", "farmacia":"Farmácia", "estoque":"Almoxarifado", "transporte":"Transporte", "regulador":"Regulação", "faturamento":"Faturamento", "vigilancia":"Vigilância", "juridico":"Jurídico", "cidadao":"Cidadão"}
 
+def reference(key, label, target, required=True):
+    return {**field(key, label, "record", required), "module": target}
+
+def clinical_field(key, label, kind="textarea", care=None, options=None):
+    return {**field(key, label, kind, False, options), "care_types": care or []}
+
+# Campos preenchidos pelo profissional; não geram diagnósticos ou condutas automáticas.
+MODULES["encounters"]["fields"] += [
+    clinical_field("blood_pressure", "Pressão arterial registrada", "text"),
+    clinical_field("temperature", "Temperatura registrada (°C)", "number"),
+    clinical_field("weight", "Peso registrado (kg)", "number"),
+    clinical_field("height", "Altura registrada (cm)", "number"),
+    clinical_field("heart_rate", "Frequência cardíaca registrada", "number"),
+    clinical_field("oxygen", "Saturação registrada (%)", "number"),
+    clinical_field("family_context", "Contexto familiar e territorial", care=["Atenção básica"]),
+    clinical_field("prevention", "Prevenção, vacinação e acompanhamento", care=["Atenção básica"]),
+    clinical_field("history", "Antecedentes e exame físico", care=["Atendimento médico", "Hospitalar"]),
+    clinical_field("nursing_diagnosis", "Avaliação e necessidades de enfermagem", care=["Enfermagem"]),
+    clinical_field("nursing_interventions", "Intervenções e avaliação dos resultados", care=["Enfermagem"]),
+    clinical_field("odontogram", "Odontograma · condição registrada por dente", "odontogram", ["Odontologia"]),
+    clinical_field("dental_plan", "Procedimentos odontológicos e plano", care=["Odontologia"]),
+    clinical_field("mental_exam", "Avaliação psicossocial", care=["CAPS"]),
+    clinical_field("therapeutic_project", "Projeto terapêutico singular · metas e ações", care=["CAPS"]),
+    clinical_field("support_network", "Rede de apoio e profissionais responsáveis", care=["CAPS"]),
+    clinical_field("followup_date", "Retorno / reavaliação", "date"),
+]
+MODULES["assets"]["fields"] += [field("useful_life", "Vida útil estimada (meses)", "number", False), field("residual_value", "Valor residual (R$)", "number", False)]
+MODULES["transport"]["fields"] += [
+    field("return_time", "Horário previsto de retorno (mesmo dia)", "time", False),
+    field("route_stops", "Roteiro · paradas na ordem de execução", "textarea", False),
+    field("authorization", "Autorização TFD / referência", required=False),
+    field("travel_cost", "Passagens / deslocamento do paciente (R$)", "number", False),
+    field("lodging_cost", "Hospedagem do paciente (R$)", "number", False),
+    field("meal_cost", "Alimentação do paciente (R$)", "number", False),
+    field("companion_cost", "Custeio do acompanhante (R$)", "number", False),
+]
+MODULES["billing"]["fields"] += [reference("source_id", "Atendimento / exame de origem", "clinical_source", False), field("review_notes", "Parecer de conferência / motivo de rejeição", "textarea", False)]
+MODULES["surveillance"]["fields"] += [field("onset_date", "Início dos sintomas", "date", False), field("outcome", "Desfecho", "select", False, ["Em acompanhamento", "Recuperado", "Óbito", "Ignorado"]), field("investigation", "Investigação e medidas registradas", "textarea", False)]
+MODULES["support"]["fields"] += [field("responsible", "Responsável pelo atendimento", required=False), field("deadline", "Prazo acordado", "date", False)]
+MODULES["training"]["fields"] += [field("duration", "Carga horária (horas)", "number", False), field("attendance", "Presença e avaliação dos participantes", "textarea", False)]
+MODULES.update({
+    "shifts": module("Escalas assistenciais", "Plantão", "Assistência", "calendar", "Escalas por unidade e profissional, com bloqueio de sobreposição.",
+        [U, field("professional_id", "Profissional", "professional"), D, field("time", "Início", "time"), field("end_date", "Data final", "date"), field("end_time", "Término", "time"), NOTE],
+        ["professional_id", "unit_id", "date", "time", "end_time", "status"], CLINICAL, ["Programado", "Concluído", "Cancelado"]),
+    "prescriptions": module("Prescrições e administração", "Item de prescrição", "Assistência", "pill", "Prescrição registrada pelo profissional e checagem de administração por dose.",
+        [P,U,D, reference("hospital_id", "Internação vinculada", "hospital", False), field("medication", "Medicamento / apresentação"), field("dose", "Dose prescrita"), field("route", "Via prescrita"), field("frequency", "Frequência / horários prescritos"), field("end_date", "Data final", "date"), NOTE],
+        ["patient_id", "medication", "dose", "date", "status"], CLINICAL, ["Ativa", "Concluída", "Suspensa"]),
+    "fleet_events": module("Abastecimento e manutenção", "Evento da frota", "Administração", "truck", "Histórico de quilometragem, despesas, abastecimentos e manutenção.",
+        [field("vehicle_id", "Veículo", "vehicle"), D, field("kind", "Tipo", "select", options=["Abastecimento", "Manutenção preventiva", "Manutenção corretiva"]), field("mileage", "Quilometragem", "number"), field("liters", "Litros (abastecimento)", "number", False), field("cost", "Custo total (R$)", "number"), field("description", "Serviço / comprovante", "textarea")],
+        ["vehicle_id", "date", "kind", "mileage", "cost", "status"], ["transporte", "gestor"], ["Registrado"]),
+    "territories": module("Territórios e população", "Base populacional", "Gestão", "building", "Cadastre o denominador e sua fonte para os indicadores epidemiológicos.",
+        [field("territory", "Território"), field("population", "População de referência", "number"), D, field("source", "Fonte / documento da população")],
+        ["territory", "population", "date", "source", "status"], ["vigilancia", "gestor"], ["Ativo", "Inativo"]),
+    "goals": module("Metas de gestão", "Meta", "Gestão", "chart", "Defina metas por unidade, indicador e período para comparar com a produção registrada.",
+        [field("unit_id", "Unidade (vazio = rede)", "unit", False), field("indicator", "Indicador", "select", options=["Atendimentos concluídos", "Exames laudados", "Produção conferida"]), D, field("end_date", "Fim do período", "date"), field("target", "Meta quantitativa", "number")],
+        ["indicator", "unit_id", "date", "end_date", "target", "status"], ["gestor"], ["Ativa", "Encerrada"]),
+})
+
 def can_access(role, module_key):
     return role == "admin" or role in MODULES[module_key]["roles"]

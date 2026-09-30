@@ -6,6 +6,7 @@ COPY saude ./saude
 COPY static ./static
 COPY docs/aderencia.json ./docs/aderencia.json
 COPY run.py backup.py manage.py ./
+COPY TR.pdf ./TR.pdf
 RUN mkdir -p instance && chown -R saude:saude /app
 USER saude
 EXPOSE 8080

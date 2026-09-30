@@ -1,6 +1,6 @@
 # Implantação e aceite
 
-O TR exige implantação inicial em até 30 dias corridos a partir da Ordem de Serviço. O cronograma abaixo é uma proposta operacional; depende da disponibilização dos insumos e da conclusão das funcionalidades pendentes. Não é evidência de execução nem garantia de viabilidade de todas as homologações nesse prazo.
+O TR exige implantação inicial em até 30 dias corridos a partir da Ordem de Serviço. O cronograma abaixo é uma proposta operacional; depende da disponibilização dos insumos e das integrações e validações externas identificadas na matriz. Não é evidência de execução nem garantia de viabilidade de todas as homologações nesse prazo.
 
 | Período | Atividades | Evidências para aceite |
 |---|---|---|
@@ -33,7 +33,23 @@ O TR exige implantação inicial em até 30 dias corridos a partir da Ordem de S
 7. Arquivos oficiais só são considerados integrados após validação nos sistemas receptores e conferência dos retornos.
 8. Backup é restaurado e comparado em ambiente separado; disponibilidade é medida externamente durante operação real.
 9. Capacitação possui relatório e confirmação dos participantes. Suporte possui equipe, canais reais e histórico.
-10. Aderência parcial permanece registrada como pendência até existir evidência de conclusão.
+10. Dependências externas permanecem vermelhas até existir evidência real de disponibilização, integração e aceite. Os critérios locais são descritos separadamente, com testes associados.
+
+## Entrada serverless na Vercel
+
+`vercel.json` encaminha as requisições para `/run.py` usando `rewrites`.
+`pyproject.toml` declara `run:app` como entrada personalizada do Flask, conforme
+a [documentação da Vercel](https://vercel.com/docs/frameworks/backend/flask).
+As dependências continuam em `requirements.txt`. Importar `run.py` expõe a
+aplicação WSGI sem iniciar o Waitress; o servidor local só inicia com execução direta.
+
+Quando `VERCEL=1`, a aplicação usa `/tmp/integra-saude` para SQLite e chaves
+geradas, evitando escrever no pacote somente leitura. Esse armazenamento é
+temporário e isolado entre instâncias: não garante preservação de cadastros,
+anexos ou sessões após reinicializações. Não há carga automática de usuários
+ou dados de demonstração. Para operação real na Vercel, ainda é necessário
+adaptar a persistência para um banco externo e configurar chaves estáveis.
+O SQLite local em `instance/` continua sendo usado fora da Vercel.
 
 ## Limites atuais de operação
 

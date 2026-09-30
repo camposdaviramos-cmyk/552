@@ -15,7 +15,8 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory, ses
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .catalog import MODULES, ROLE_LABELS, can_access
-from .db import SCHEMA, audit, db, decrypt, encrypt, identity_hash, now, patient_dict, record_dict
+from .db import SCHEMA, audit, db, decrypt, encrypt, identity_hash, now, patient_dict, record_dict, snapshot
+from . import workflows
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,6 +60,8 @@ def create_app(config=None):
     def protect():
         if not request.path.startswith("/api/"):
             return
+        if request.method in ("POST","PATCH","PUT") and request.is_json and not isinstance(request.get_json(silent=True),dict):
+            return jsonify(error="O corpo JSON deve ser um objeto."),400
         if request.path in ("/api/session","/api/login","/api/health"):
             if request.path=="/api/login" and request.method=="POST" and not valid_csrf():
                 return jsonify(error="Sessão expirada. Recarregue a página."),403
@@ -280,13 +283,19 @@ def create_app(config=None):
             if value is None or str(value).strip()=="":
                 result[f["key"]]=""
                 continue
-            if f["type"] in ("patient","unit","professional","vehicle"):
+            if f["type"] in ("patient","unit","professional","vehicle","record"):
                 try: value=int(value)
                 except (ValueError,TypeError): raise ValidationError(f'Referência inválida: {f["label"]}.')
-                table={"patient":"patients","unit":"units","professional":"users","vehicle":"records"}[f["type"]]
+                table={"patient":"patients","unit":"units","professional":"users","vehicle":"records","record":"records"}[f["type"]]
                 row=db().execute(f"SELECT * FROM {table} WHERE id=?",(value,)).fetchone()
                 if not row or (f["type"]=="vehicle" and row["module"]!="fleet") or (f["type"]=="professional" and (not row["active"] or row["role"] not in ("admin","clinico"))):
                     raise ValidationError(f'Referência inexistente: {f["label"]}.')
+                if f["type"]=="record":
+                    targets=("appointments","encounters","exams") if f["module"]=="clinical_source" else (f["module"],)
+                    if row["module"] not in targets:
+                        raise ValidationError(f'Referência incompatível: {f["label"]}.')
+            elif f["type"]=="odontogram":
+                value=workflows.odontogram(value,ValidationError)
             elif f["type"]=="number":
                 try:
                     value=float(value)
@@ -342,6 +351,7 @@ def create_app(config=None):
                 if old and r["id"]==old["id"]: continue
                 if r["date"]==result["date"] and r["time"]==result["time"] and (r["professional_id"]==result["professional_id"] or r["patient_id"]==result["patient_id"]):
                     raise ValidationError("Já existe um agendamento para este paciente ou profissional neste horário.")
+        workflows.validate(key,result,data,old,ValidationError)
         return result
 
     @app.get("/api/records/<key>")
@@ -360,8 +370,10 @@ def create_app(config=None):
         value=validate_record(key,data)
         status=data.get("status",MODULES[key]["statuses"][0])
         if status not in MODULES[key]["statuses"]: raise ValidationError("Situação inválida.")
+        value=workflows.seal(key,value,status)
         cur=db().execute("INSERT INTO records(module,patient_id,unit_id,payload,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",(key,value.get("patient_id") or None,value.get("unit_id") or None,encrypt(value),status,g.user["id"],now(),now()))
         rid=cur.lastrowid
+        workflows.after_save(key,rid,value)
         audit("create",key,rid)
         db().commit()
         return jsonify(id=rid),201
@@ -376,13 +388,16 @@ def create_app(config=None):
         data=request.get_json(silent=True) or {}
         if data.get("version")!=old["version"]:
             return jsonify(error="Este registro foi atualizado por outra pessoa. Recarregue antes de salvar."),409
-        if key=="encounters" and old["status"]=="Finalizado":
-            return jsonify(error="Um registro clínico finalizado é imutável. Crie uma nova evolução para complementá-lo."),409
+        if workflows.FINAL.get(key)==old["status"]:
+            return jsonify(error="Registro finalizado é imutável. Crie um novo registro para complementá-lo."),409
         merged={**old,**data}
         value=validate_record(key,merged,old)
         status=merged["status"]
         if status not in MODULES[key]["statuses"]: raise ValidationError("Situação inválida.")
+        value=workflows.seal(key,value,status)
+        snapshot(rid)
         db().execute("UPDATE records SET payload=?,patient_id=?,unit_id=?,status=?,version=version+1,updated_at=? WHERE id=?",(encrypt(value),value.get("patient_id") or None,value.get("unit_id") or None,status,now(),rid))
+        workflows.after_save(key,rid,value)
         audit("update",key,rid)
         db().commit()
         return jsonify(ok=True)
@@ -410,10 +425,12 @@ def create_app(config=None):
         reason=str(data.get("reason","")).strip()
         if not reason: raise ValidationError("Informe o motivo / documento da movimentação.")
         payload=decrypt(row["payload"])
+        snapshot(rid)
         payload["quantity"]+=amount if kind=="Entrada" else -amount
         db().execute("UPDATE records SET payload=?,version=version+1,updated_at=? WHERE id=?",(encrypt(payload),now(),rid))
         db().execute("INSERT INTO movements(record_id,patient_id,quantity,kind,reason,created_by,created_at) VALUES(?,?,?,?,?,?,?)",(rid,pid,amount,kind,encrypt(reason),g.user["id"],now()))
         audit("stock_move",row["module"],rid)
+        snapshot(rid)
         db().commit()
         return jsonify(quantity=payload["quantity"])
 
@@ -522,7 +539,13 @@ def create_app(config=None):
     @app.get("/api/users")
     @roles()
     def users():
-        return jsonify(items=[dict(r) for r in db().execute("SELECT id,name,username,role,active,patient_id FROM users ORDER BY id")])
+        return jsonify(items=[dict(r) for r in db().execute("SELECT id,name,username,role,active,patient_id,professional_hash IS NOT NULL AS identified FROM users ORDER BY id")])
+
+    def professional_identity(cpf_value):
+        cpf=re.sub(r"\D","",str(cpf_value or ""))
+        if len(cpf)!=11 or len(set(cpf))==1 or any((sum(int(cpf[j])*(n+1-j) for j in range(n))*10%11%10)!=int(cpf[n]) for n in (9,10)):
+            raise ValidationError("Informe CPF válido para a identificação única do profissional assistencial.")
+        return identity_hash("professional:"+cpf),encrypt({"cpf":cpf})
 
     @app.post("/api/users")
     @roles()
@@ -533,16 +556,31 @@ def create_app(config=None):
         if len(str(data.get("name","")))<3 or not re.fullmatch(r"[a-z0-9_.@-]{3,120}",str(data.get("username",""))): raise ValidationError("Informe nome e usuário válidos.")
         pid=data.get("patient_id") or None
         if data["role"]=="cidadao" and not pid: raise ValidationError("Vincule o cidadão ao seu cadastro de paciente.")
-        cur=db().execute("INSERT INTO users(name,username,password,role,patient_id) VALUES(?,?,?,?,?)",(data["name"],data["username"],generate_password_hash(data["password"]),data["role"],pid))
+        professional_hash=None;professional_payload=None
+        if data["role"]=="clinico":
+            professional_hash,professional_payload=professional_identity(data.get("professional_cpf"))
+            if db().execute("SELECT 1 FROM users WHERE professional_hash=?",(professional_hash,)).fetchone():
+                raise ValidationError("Profissional já cadastrado com este CPF. Utilize a conta existente.")
+        cur=db().execute("INSERT INTO users(name,username,password,role,patient_id,professional_hash,professional_payload) VALUES(?,?,?,?,?,?,?)",(data["name"],data["username"],generate_password_hash(data["password"]),data["role"],pid,professional_hash,professional_payload))
         audit("create","users",cur.lastrowid); db().commit()
         return jsonify(id=cur.lastrowid),201
 
     @app.patch("/api/users/<int:uid>")
     @roles()
     def disable_user(uid):
-        if uid==g.user["id"]: raise ValidationError("Você não pode desativar a própria conta.")
         data=request.get_json(silent=True) or {}
-        db().execute("UPDATE users SET active=? WHERE id=?",(1 if data.get("active") else 0,uid))
+        row=db().execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
+        if not row:return jsonify(error="Usuário não encontrado."),404
+        if "professional_cpf" in data:
+            if row["role"]!="clinico":raise ValidationError("A identificação profissional aplica-se ao perfil assistencial.")
+            fingerprint,payload=professional_identity(data["professional_cpf"])
+            if db().execute("SELECT 1 FROM users WHERE professional_hash=? AND id<>?",(fingerprint,uid)).fetchone():
+                raise ValidationError("CPF já vinculado a outro profissional.")
+            db().execute("UPDATE users SET professional_hash=?,professional_payload=? WHERE id=?",(fingerprint,payload,uid))
+        elif "active" in data:
+            if uid==g.user["id"]: raise ValidationError("Você não pode desativar a própria conta.")
+            db().execute("UPDATE users SET active=? WHERE id=?",(1 if data.get("active") else 0,uid))
+        else:raise ValidationError("Informe a atualização do acesso ou identificação profissional.")
         audit("access_change","users",uid); db().commit()
         return jsonify(ok=True)
 
@@ -558,6 +596,8 @@ def create_app(config=None):
         items=[{k:r[k] for k in ["id","module","status"]+allowed[r["module"]] if k in r} for r in rows]
         for item in items:
             if item["module"]=="exams" and item["status"]!="Laudado":item.pop("result",None)
+            if item["module"]=="exams" and item["status"]=="Laudado":
+                item["attachments"]=[dict(id=a["id"],name=decrypt(a["metadata"])["name"]) for a in db().execute("SELECT id,metadata FROM attachments WHERE record_id=?",(item["id"],))]
         audit("read_own","citizen",pid); db().commit()
         return jsonify(patient={k:patient_dict(row)[k] for k in ("id","name")},items=items,units=[dict(r) for r in db().execute("SELECT * FROM units")])
 
@@ -571,7 +611,9 @@ def create_app(config=None):
         valid=(row["module"]=="messages" and data.get("action")=="read") or (row["module"]=="appointments" and data.get("action") in ("confirm","cancel") and row["status"] in ("Agendado","Confirmado"))
         if not valid: raise ValidationError("Esta ação não está disponível para o registro.")
         status={"read":"Lida","confirm":"Confirmado","cancel":"Cancelado"}[data["action"]]
+        snapshot(rid)
         db().execute("UPDATE records SET status=?,version=version+1,updated_at=? WHERE id=?",(status,now(),rid))
+        snapshot(rid)
         audit("citizen_action",row["module"],rid); db().commit()
         return jsonify(ok=True)
 
@@ -580,14 +622,30 @@ def create_app(config=None):
     def compliance():
         return jsonify(json.loads((ROOT / "docs" / "aderencia.json").read_text(encoding="utf-8")))
 
+    @app.get("/api/compliance/document")
+    @roles("gestor")
+    def compliance_document():
+        return send_from_directory(ROOT,"TR.pdf")
+
     @app.get("/api/integrations")
     @roles("gestor","faturamento")
     def integrations():
         return jsonify(items=[dict(name=n,status="Não homologada",description=d) for n,d in [("e-SUS APS","Requer implementação e validação do leiaute oficial de intercâmbio."),("SISAB","Requer validação do fluxo oficial de envio e retorno da produção."),("CNES","Requer carga oficial dos estabelecimentos e profissionais."),("BPA","Requer geração e homologação dos arquivos no aplicativo oficial."),("SIA/SUS","Requer validação da produção e retorno de processamento."),("Ministério da Saúde","Demais sistemas devem ser definidos com a equipe municipal.")]])
 
+    workflows.register(app,ValidationError,roles)
+    from .analytics import register as register_analytics
+    register_analytics(app,ValidationError,roles)
+    from .migration import register as register_migration
+    register_migration(app,ValidationError,roles,validate_record)
+
     with app.app_context():
         db().executescript(SCHEMA)
         if "version" not in [r[1] for r in db().execute("PRAGMA table_info(patients)")]:
             db().execute("ALTER TABLE patients ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+        user_columns={r[1] for r in db().execute("PRAGMA table_info(users)")}
+        for column in ("professional_hash","professional_payload"):
+            if column not in user_columns:
+                db().execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
+        db().execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_professional ON users(professional_hash)")
         db().commit()
     return app

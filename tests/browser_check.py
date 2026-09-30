@@ -1,5 +1,6 @@
 """Validação de navegação e responsividade em Chrome instalado localmente."""
 from pathlib import Path
+import os
 from playwright.sync_api import sync_playwright
 
 ROOT=Path(__file__).resolve().parent.parent
@@ -11,7 +12,7 @@ with sync_playwright() as p:
     page=browser.new_page(viewport={'width':1440,'height':1080},device_scale_factor=1)
     errors=[]
     page.on('pageerror',lambda error:errors.append(str(error)))
-    page.goto('http://127.0.0.1:8080')
+    page.goto(os.environ.get('INTEGRA_TEST_URL','http://127.0.0.1:8080'))
     page.get_by_role('button',name='Acessar demonstração').click()
     page.get_by_role('heading',name='Painel da rede',exact=True).wait_for()
     page.screenshot(path=str(ARTIFACTS/'dashboard-desktop.png'),full_page=True)

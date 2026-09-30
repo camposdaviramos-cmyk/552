@@ -2,7 +2,7 @@
 
 Plataforma web de gestão municipal de saúde, desenvolvida a partir das **13 páginas do TR.pdf** da Secretaria Municipal de Saúde de Conceição de Macabu/RJ.
 
-**Situação: versão funcional local de demonstração, com backend e persistência. Não está homologada nem comprova atendimento integral ao TR.** A matriz dentro do sistema e [docs/aderencia.json](docs/aderencia.json) distinguem implementação local, atendimento parcial e dependências externas.
+**Situação após auditoria das 13 páginas: 38 critérios locais implementados e 32 dependências externas identificadas.** A [matriz](docs/aderencia.json) descreve os critérios e as evidências. As dependências externas aparecem em vermelho no sistema. O percentual local não representa homologação nem atendimento integral do contrato. Veja o [relatório da auditoria](docs/AUDITORIA-TR.md).
 
 ## Abrir a demonstração
 
@@ -33,24 +33,19 @@ O portal do cidadão também abre em **http://127.0.0.1:8080/cidadao**. As conta
 
 ## Funcionalidades executáveis
 
-- Painel calculado a partir da base, filtros por unidade/período, agenda do dia, alertas e relatórios CSV.
-- Cadastro único com validação de CPF/CNS, busca, atualização, prevenção de duplicidade e histórico municipal.
-- Agenda com profissional, unidade, especialidade, controle de conflito e situação do atendimento.
-- Evolução SOAP por linha de cuidado: atenção básica, médico, enfermagem, odontologia, CAPS e hospitalar. Registros finalizados são imutáveis.
-- Internações com leito, prevenção de dupla ocupação, alta e transferência.
-- Regulação com prioridade, justificativa, autorização e fila de espera.
-- Solicitações de exames/procedimentos e resultados textuais.
-- Vigilância com agravo, território, classificação e acompanhamento.
-- Farmácia e almoxarifado com lotes, validade, saldo, mínimo, movimentações e dispensação por paciente. Saídas de lote vencido ou acima do saldo são bloqueadas.
-- Patrimônio, frota, viagens TFD e controle de capacidade por veículo/horário, incluindo acompanhantes.
-- Produção SUS por competência, conferência e exportação interna em CSV.
-- Demandas judiciais com prazos e alertas.
-- Mensagens individuais no portal; cidadão acessa somente seus dados, confirma/cancela agenda e acompanha solicitações/exames liberados.
-- Chamados de suporte/manutenção, atividades de implantação e relatórios textuais de capacitação.
-- Gestão de unidades/CNES e usuários em 13 perfis; desativação revoga sessões existentes.
-- Trilha de auditoria encadeada, criptografia dos conteúdos sensíveis, proteção CSRF e bloqueio temporário de tentativas de login.
-- Migração de cadastro em CSV com validação prévia e gravação atômica.
-- Backup criptografado consistente e restauração para um arquivo separado.
+- Cadastro único de pacientes, unidades e profissionais; CPF profissional único e cifrado para novas contas assistenciais, com identificação de contas anteriores pela administração.
+- Prontuário municipal com SOAP, fichas específicas de atenção básica, médico, enfermagem e CAPS; odontograma de permanentes/decíduos; autoria, selo de integridade local e finalização imutável.
+- Anexos PDF/PNG/JPEG cifrados no banco, histórico de versões, liberação de laudos, acesso do titular e relatório imprimível.
+- Agenda, regulação, leitos, alta/transferência, escalas sem sobreposição, prescrições vinculadas à internação e checagem individual de doses sem duplicação.
+- Estoque, lotes, validade e dispensação por paciente; transferência entre unidades com saída/entrada atômicas e histórico.
+- Patrimônio com tombamento único, inventário, transferências e cálculo linear de depreciação por parâmetros cadastrados.
+- Transporte/TFD com capacidade incluindo acompanhante, intervalos, roteiro manual ordenado e custeio; frota com placa única, despesas, abastecimento e hodômetro sem retrocesso.
+- Produção local SUS vinculada ao atendimento, conferência/rejeição com parecer e bloqueio de duplicidade; CSV interno, sem alegação de arquivo oficial BPA/SIA.
+- Vigilância, investigação, desfechos, bases populacionais com fonte, indicadores epidemiológicos, metas de gestão e BI por período/unidade com exportação do recorte.
+- Portal instalável por navegador compatível, mensagens por eventos enquanto conectado, confirmação de agenda, resultados e anexos liberados; página offline sem cache de dados de saúde.
+- Suporte e treinamento com acompanhamento, responsáveis, presença, carga horária, evidências, anexos e relatórios. [Manual operacional](static/manual.html) disponível no menu.
+- Importação CSV de pacientes e JSON dos módulos com simulação transacional, identificadores de origem, recibos de reconciliação e bloqueio de reimportação.
+- 12 perfis, CSRF, isolamento do titular, bloqueio de tentativas, revogação de acesso, auditoria encadeada e backups consistentes cifrados com restauração não destrutiva.
 
 ## Roteiro de demonstração
 
@@ -93,7 +88,7 @@ Com o servidor local aberto e o Chrome instalado no caminho padrão:
 .\.venv\Scripts\python.exe tests\browser_check.py
 ```
 
-Esse roteiro verifica a navegação, busca, prontuário, módulos, estoque, portal do cidadão e responsividade. Capturas ficam em `artifacts/`. Não é um teste de carga ou homologação clínica.
+Esse roteiro verifica a navegação, busca, prontuário, módulos, estoque, portal do cidadão e responsividade. `tests/browser_workflows.py` valida os novos fluxos contra uma instância descartável indicada por `INTEGRA_TEST_URL` (padrão: porta 8081). Capturas ficam em `artifacts/`. Não é um teste de carga ou homologação clínica.
 
 ## Backups
 
@@ -129,7 +124,10 @@ Flask + Waitress ─── autorização por perfil
 - `saude/catalog.py`: contratos dos formulários, módulos e perfis.
 - `saude/app.py`: API, validações, autorização e fluxos.
 - `saude/db.py`: esquema, serialização criptografada e auditoria.
-- `static/`: interface responsiva sem CDN e sem dependências de frontend.
+- `saude/workflows.py`: validações, anexos, eventos, transferências e autoria.
+- `saude/analytics.py`: indicadores, metas e exportação filtrada.
+- `saude/migration.py`: importação transacional de registros e recibos.
+- `static/`: interface, fichas especializadas, manual e PWA, sem CDN.
 - `seed.py`: dados e contas fictícias.
 - `backup.py`: snapshot, retenção e restauração.
 - `docs/`: rastreabilidade, plano e pendências.
@@ -152,16 +150,12 @@ Depois de criar o administrador, cadastre as unidades oficiais pela interface. A
 
 O proxy solicita certificados para o domínio configurado. Acesso público, DNS, firewall, gestão de chaves, disco criptografado, cópia externa dos backups, monitoramento e dimensionamento devem ser verificados antes de inserir dados reais. O Compose descreve uma única instância e não comprova alta disponibilidade.
 
-## Pendências para atendimento integral
+## Dependências externas para atendimento integral
 
-O TR descreve um objeto de contratação amplo. Construir telas para cada nome de módulo não equivale a homologar todos os processos da saúde municipal.
+Os 32 itens vermelhos da matriz especificam dependência, responsável e próxima ação. Incluem dados oficiais da rede e população; bases e versões de e-SUS APS, SISAB, CNES, SIGTAP, BPA e SIA/SUS; sistemas laboratoriais; legado; certificados quando aplicáveis; infraestrutura cloud/TLS, cópias externas, monitoramento e SLA; execução real de suporte e treinamento; validações institucionais; e obrigações licitatórias/contratuais.
 
-1. **Integrações oficiais:** conectores e validação dos leiautes e fluxos de e-SUS APS, SISAB, CNES, BPA, SIA/SUS e demais sistemas MS. O CSV entregue é interno e não deve ser enviado como arquivo oficial BPA/SIA.
-2. **Fluxos assistenciais especializados:** aprofundar fichas de cada profissão, odontograma, protocolos CAPS, prescrição hospitalar, anexos, assinaturas e validação com responsáveis clínicos.
-3. **Aplicativo/mensageria:** o portal responsivo tem manifesto e consulta de mensagens a cada 30 segundos; não há aplicativo nativo, push, WhatsApp ou SMS conectado. Não há envio externo de mensagens.
-4. **Operação e SLA:** implantação real, teste de carga, monitoramento externo, disponibilidade de 99,5%, recuperação de desastre e equipe de suporte por telefone/e-mail.
-5. **Migração:** mapeamento dos históricos e demais tabelas do sistema legado, amostras, reconciliação e aceite municipal.
-6. **Governança:** validação institucional das obrigações LGPD/MS/DATASUS, políticas de acesso e retenção, documentação e evidências de execução.
-7. **Licitação e contrato:** atestados da licitante, certidões, documentação jurídica, proposta, aceite, notas fiscais e demais obrigações administrativas. Não são comprovados por software.
+As fichas registram avaliações e condutas informadas pelo profissional. Não geram diagnóstico nem recomendam dose. O selo HMAC local atesta integridade/autoria dentro da aplicação e não substitui assinatura qualificada. O TR não detalha padrões de assinatura nem exige nominalmente SMS, WhatsApp, push ou lojas; esses complementos estão identificados separadamente das funções locais de portal e mensagens.
 
-Consulte [o mapa do TR](docs/TR-MAPEADO.md), [o plano de implantação](docs/IMPLANTACAO.md) e a matriz no próprio sistema. Não foi declarado atendimento integral, homologação oficial ou garantia de resultado na licitação.
+`vercel.json` direciona rotas a `run.py`. Essa configuração não converte o banco SQLite local em armazenamento persistente de uma plataforma serverless. O ambiente de produção precisa oferecer persistência e execução apropriadas para o servidor, eventos e backups; essa dependência aparece em vermelho.
+
+Consulte [a auditoria](docs/AUDITORIA-TR.md), [a validação](docs/VALIDACAO.md), [o mapa do TR](docs/TR-MAPEADO.md) e [o plano de implantação](docs/IMPLANTACAO.md).

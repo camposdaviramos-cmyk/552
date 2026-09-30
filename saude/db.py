@@ -16,6 +16,10 @@ CREATE INDEX IF NOT EXISTS ix_records_patient ON records(patient_id);
 CREATE TABLE IF NOT EXISTS movements(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), patient_id INTEGER REFERENCES patients(id), quantity INTEGER NOT NULL, kind TEXT NOT NULL, reason TEXT NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor INTEGER, action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT, created_at TEXT NOT NULL, previous_hash TEXT NOT NULL, hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS login_attempts(key TEXT PRIMARY KEY, failures INTEGER NOT NULL, last_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS record_history(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), version INTEGER NOT NULL, payload TEXT NOT NULL, actor INTEGER REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE(record_id,version));
+CREATE TABLE IF NOT EXISTS attachments(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), metadata TEXT NOT NULL, content BLOB NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS workflow_events(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), kind TEXT NOT NULL, payload TEXT NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS migration_runs(id INTEGER PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, payload TEXT NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL);
 """
 
 def now():
@@ -54,3 +58,8 @@ def patient_dict(row):
 
 def record_dict(row):
     return dict(id=row["id"],module=row["module"],status=row["status"],version=row["version"],created_at=row["created_at"],updated_at=row["updated_at"],created_by=row["created_by"],**decrypt(row["payload"]))
+
+def snapshot(rid):
+    row = db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
+    db().execute("INSERT OR IGNORE INTO record_history(record_id,version,payload,actor,created_at) VALUES(?,?,?,?,?)",
+                 (rid, row["version"], encrypt(record_dict(row)), session.get("uid"), now()))
