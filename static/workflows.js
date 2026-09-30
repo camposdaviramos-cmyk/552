@@ -85,12 +85,34 @@ let citizenEvents=null,citizenRevision='',citizenRefreshPending=false,installPro
 function stopCitizenEvents(){citizenEvents?.close();citizenEvents=null;citizenRevision='';}
 function startCitizenEvents(){
   if(citizenEvents||state.user?.role!=='cidadao'||document.hidden)return;
-  citizenEvents=new EventSource('/api/citizen/events',{withCredentials:true});
-  citizenEvents.addEventListener('refresh',event=>{
-    if(citizenRevision!==event.lastEventId){if($('#modal').open)citizenRefreshPending=true;else renderCitizen();}
-    citizenRevision=event.lastEventId;
-  });
-  citizenEvents.addEventListener('revoked',()=>{stopCitizenEvents();state.user=null;renderLogin();});
+  const controller=new AbortController();
+  const stream={connected:false,close:()=>controller.abort()};citizenEvents=stream;
+  const tokenAtStart=authToken;
+  // Native EventSource cannot send Authorization; read SSE with authenticated fetch.
+  (async()=>{
+    const timeout=setTimeout(()=>controller.abort(),65000);
+    try{
+      const response=await fetch(API_BASE+'/citizen/events',{credentials:'include',headers:authHeaders({'Last-Event-ID':citizenRevision}),signal:controller.signal});
+      if(citizenEvents!==stream)return;
+      if(response.status===401){if(authToken===tokenAtStart){clearAuth();renderLogin();}return;}
+      if(!response.ok)return; // Periodic refresh remains available if SSE slots are full.
+      stream.connected=true;
+      const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='';
+      while(!controller.signal.aborted){
+        const {value,done}=await reader.read();if(done)break;
+        buffer+=decoder.decode(value,{stream:true}).replace(/\r\n/g,'\n');
+        let boundary;
+        while((boundary=buffer.indexOf('\n\n'))!==-1){
+          const block=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);
+          if(citizenEvents!==stream)return;
+          const kind=block.match(/^event: ?(.*)$/m)?.[1];const revision=block.match(/^id: ?(.*)$/m)?.[1];
+          if(kind==='revoked'){clearAuth();renderLogin();return;}
+          if(kind==='refresh'&&revision&&citizenRevision!==revision){citizenRevision=revision;if($('#modal').open)citizenRefreshPending=true;else renderCitizen();}
+        }
+      }
+    }catch(error){/* Reconnect on the next periodic/visibility refresh. */}
+    finally{clearTimeout(timeout);controller.abort();if(citizenEvents===stream)citizenEvents=null;}
+  })();
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden){citizenEvents?.close();citizenEvents=null;}else if(state.user?.role==='cidadao'){renderCitizen();startCitizenEvents();}});
 $('#modal').addEventListener('close',()=>{if(citizenRefreshPending&&state.user?.role==='cidadao'){citizenRefreshPending=false;renderCitizen();}});

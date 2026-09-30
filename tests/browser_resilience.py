@@ -64,7 +64,8 @@ with sync_playwright() as p:
             other.get_by_role('heading',name='Olá, Maria.').wait_for()
             streams.append(other)
         assert context.request.get(URL+'/api/health',timeout=5000).status==200
-        assert context.request.get(URL+'/api/citizen',timeout=5000).status==200
+        headers={'Authorization':'Bearer '+page.evaluate('authToken')}
+        assert context.request.get(URL+'/api/citizen',headers=headers,timeout=5000).status==200
     finally:
         for other in streams:other.close()
     assert not errors,errors

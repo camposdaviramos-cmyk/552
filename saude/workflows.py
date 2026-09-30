@@ -187,6 +187,7 @@ def register(app, error, roles):
         if not stream_slots.acquire(blocking=False):
             return jsonify(error="Canal ocupado; o portal utilizará atualização periódica."), 503
         uid, pid = g.user["id"], g.user["patient_id"]
+        auth_session = g.auth_session
         released = False
         def release_slot():
             nonlocal released
@@ -201,7 +202,8 @@ def register(app, error, roles):
                 for _ in range(app.config.get("EVENT_STREAM_TICKS", 20)):
                     with app.app_context():
                         user = db().execute("SELECT active,patient_id,role FROM users WHERE id=?", (uid,)).fetchone()
-                        if not user or not user["active"] or user["role"] != "cidadao" or user["patient_id"] != pid:
+                        session_active = not auth_session or db().execute("SELECT 1 FROM auth_sessions WHERE token_hash=? AND expires_at>?", (auth_session["token_hash"], time.time())).fetchone()
+                        if not session_active or not user or not user["active"] or user["role"] != "cidadao" or user["patient_id"] != pid:
                             yield "event: revoked\ndata: {}\n\n"
                             return
                         versions = [tuple(r) for r in db().execute("SELECT id,version FROM records WHERE patient_id=? AND module IN ('appointments','messages','regulation','exams') ORDER BY id", (pid,))]

@@ -16,6 +16,8 @@ CREATE INDEX IF NOT EXISTS ix_records_patient ON records(patient_id);
 CREATE TABLE IF NOT EXISTS movements(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), patient_id INTEGER REFERENCES patients(id), quantity INTEGER NOT NULL, kind TEXT NOT NULL, reason TEXT NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor INTEGER, action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT, created_at TEXT NOT NULL, previous_hash TEXT NOT NULL, hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS login_attempts(key TEXT PRIMARY KEY, failures INTEGER NOT NULL, last_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS auth_sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_auth_sessions_expiry ON auth_sessions(expires_at);
 CREATE TABLE IF NOT EXISTS record_history(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), version INTEGER NOT NULL, payload TEXT NOT NULL, actor INTEGER REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE(record_id,version));
 CREATE TABLE IF NOT EXISTS attachments(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), metadata TEXT NOT NULL, content BLOB NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS workflow_events(id INTEGER PRIMARY KEY, record_id INTEGER NOT NULL REFERENCES records(id), kind TEXT NOT NULL, payload TEXT NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL);
@@ -47,7 +49,7 @@ def audit(action, entity, entity_id=""):
         conn.execute("BEGIN IMMEDIATE")
     prev = conn.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
     previous = prev[0] if prev else "0"*64
-    actor = session.get("uid") if has_request_context() else None
+    actor = (getattr(g, "user", None) or {}).get("id", session.get("uid")) if has_request_context() else None
     stamp = now()
     content = json.dumps([actor,action,entity,str(entity_id),stamp,previous],ensure_ascii=False)
     digest = identity_hash(content)
@@ -62,4 +64,4 @@ def record_dict(row):
 def snapshot(rid):
     row = db().execute("SELECT * FROM records WHERE id=?", (rid,)).fetchone()
     db().execute("INSERT OR IGNORE INTO record_history(record_id,version,payload,actor,created_at) VALUES(?,?,?,?,?)",
-                 (rid, row["version"], encrypt(record_dict(row)), session.get("uid"), now()))
+                 (rid, row["version"], encrypt(record_dict(row)), g.user["id"], now()))

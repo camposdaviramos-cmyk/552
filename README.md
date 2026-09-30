@@ -146,6 +146,41 @@ SQLite é uma escolha para demonstração e instalação inicial em uma única i
 
 ## Implantação em nuvem
 
+### Autenticação entre Vercel e Render
+
+No domínio Vercel, `static/app.js` direciona todas as chamadas da API para
+`https://five52-9ftx.onrender.com/api`. Em execução local ou no próprio Render,
+usa `/api`. O CSP permite essa conexão e o CORS aceita as origens Vercel
+explicitamente configuradas no backend, com `Authorization`, `X-CSRF-Token`
+e `Last-Event-ID` no preflight.
+
+`GET /api/session` fornece um desafio CSRF assinado para o login, válido por
+10 minutos mesmo sem cookie. `POST /api/login` retorna `user`, `csrf`, `token`,
+`token_type: "Bearer"` e `expires_in` (1.800 segundos por padrão), além do cookie.
+O frontend guarda apenas o token em `sessionStorage` (`integra.auth.v1`) e envia
+`Authorization: Bearer <token>` nas chamadas, uploads, downloads e eventos SSE.
+Ao recarregar a página, valida o token em `/api/session` antes de abrir a rota
+do hash. O token permanece na mesma aba; o armazenamento não contém prontuários.
+
+O backend mantém somente o hash SHA-256 do token aleatório na tabela
+`auth_sessions`, criada automaticamente na inicialização. A validade é renovada
+com a atividade, usando `PERMANENT_SESSION_LIFETIME` (30 minutos). O logout revoga
+o token e o cookie da mesma sessão. Perfis e usuários ativos são verificados a
+cada requisição; cookies continuam exigindo CSRF para gravações. Um Bearer
+inválido recebe 401, sem recorrer a outro usuário identificado por cookie.
+Falhas de rede e respostas 5xx não apagam o token do frontend.
+
+Publique backend e frontend para ativar o fluxo nos dois serviços. Preserve o
+banco e as chaves no armazenamento persistente do Render para manter sessões
+entre reinícios. O cookie deixa de ser necessário para autenticar;
+expiração, revogação ou perda do banco ainda exigem novo login.
+
+Regressões: `python -m pytest -q tests/test_token_auth.py`. Para o navegador,
+inicie `python tests/browser_server.py` e execute
+`python tests/browser_token_auth.py` em outro terminal. O roteiro usa os nomes
+das origens Vercel/Render no Chrome, encaminha tudo para a instância local
+descartável e remove cookies em ambos os sentidos, sem acessar produção.
+
 Os arquivos `Dockerfile`, `compose.yaml` e `Caddyfile` preparam aplicação, worker de backup e proxy HTTPS. **A composição não foi executada neste ambiente, que não possui Docker.**
 
 Em um servidor com Docker e domínio apontado:

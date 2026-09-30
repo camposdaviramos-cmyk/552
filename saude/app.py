@@ -14,10 +14,12 @@ from cryptography.fernet import Fernet
 from flask import Flask, Response, g, jsonify, request, send_from_directory, session
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.exceptions import Unauthorized
 
 from .catalog import MODULES, ROLE_LABELS, can_access
 from .db import SCHEMA, audit, db, decrypt, encrypt, identity_hash, now, patient_dict, record_dict, snapshot
 from . import workflows
+from .auth import issue_session, lifetime, new_csrf, resolve_user, revoke_session, valid_csrf
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -51,7 +53,8 @@ def create_app(config=None):
             "https://552-blue.vercel.app",
             "https://552-8x8574vka-dev-spacey1.vercel.app",
         ],
-        allow_headers=["Content-Type", "X-CSRF-Token"],
+        allow_headers=["Content-Type", "X-CSRF-Token", "Authorization", "Last-Event-ID"],
+        expose_headers=["Content-Disposition"],
         methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         always_send=False,
     )
@@ -85,29 +88,30 @@ def create_app(config=None):
             return
         if request.method in ("POST","PATCH","PUT") and request.is_json and not isinstance(request.get_json(silent=True),dict):
             return jsonify(error="O corpo JSON deve ser um objeto."),400
-        if request.path in ("/api/session","/api/login","/api/health"):
-            if request.path=="/api/login" and request.method=="POST" and not valid_csrf():
+        if request.path in ("/api/login","/api/health"):
+            if request.path=="/api/login" and request.method=="POST" and not valid_csrf(login=True):
                 return jsonify(error="Sessão expirada. Recarregue a página."),403
             return
-        uid = session.get("uid")
-        user = db().execute("SELECT * FROM users WHERE id=? AND active=1",(uid,)).fetchone() if uid else None
+        try:
+            user = resolve_user()
+        except Unauthorized:
+            return jsonify(error="Sessão inválida ou expirada. Entre novamente."),401
+        g.user = user
+        if request.path == "/api/session":
+            return
         if not user:
             return jsonify(error="Entre na sua conta para continuar."),401
-        g.user = dict(user)
-        if request.method in ("POST","PATCH","DELETE","PUT") and not valid_csrf():
+        if request.method in ("POST","PATCH","DELETE","PUT") and not g.bearer_auth and not valid_csrf():
             return jsonify(error="Token de segurança inválido. Recarregue a página."),403
         if user["role"]=="cidadao" and not request.path.startswith(("/api/citizen","/api/logout")):
             return jsonify(error="Este recurso é restrito à equipe de saúde."),403
-
-    def valid_csrf():
-        return bool(session.get("csrf")) and secrets.compare_digest(request.headers.get("X-CSRF-Token",""),session["csrf"])
 
     @app.after_request
     def headers(response):
         response.headers["X-Content-Type-Options"]="nosniff"
         response.headers["X-Frame-Options"]="DENY"
         response.headers["Referrer-Policy"]="same-origin"
-        response.headers["Content-Security-Policy"]="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+        response.headers["Content-Security-Policy"]="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://five52-9ftx.onrender.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"]="no-store"
         if app.config["SESSION_COOKIE_SECURE"]:
@@ -141,9 +145,9 @@ def create_app(config=None):
 
     @app.get("/api/session")
     def get_session():
-        session.setdefault("csrf",secrets.token_urlsafe(32))
-        user = db().execute("SELECT id,name,username,role,patient_id FROM users WHERE id=? AND active=1",(session.get("uid"),)).fetchone()
-        return jsonify(csrf=session["csrf"],user=dict(user) if user else None,demo=app.config["DEMO"],roles=ROLE_LABELS)
+        csrf = g.auth_session["csrf"] if g.auth_session else session.setdefault("csrf",new_csrf())
+        user = {k:g.user[k] for k in ("id","name","username","role","patient_id")} if g.user else None
+        return jsonify(csrf=csrf,user=user,demo=app.config["DEMO"],roles=ROLE_LABELS)
 
     @app.post("/api/login")
     def login():
@@ -159,19 +163,17 @@ def create_app(config=None):
             db().execute("INSERT INTO login_attempts VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET failures=excluded.failures,last_at=excluded.last_at",(key,failures,time.time()))
             db().commit()
             return jsonify(error="Usuário ou senha inválidos."),401
-        session.clear()
-        session.update(uid=user["id"],csrf=secrets.token_urlsafe(32))
-        session.permanent=True
+        token = issue_session(user)
         db().execute("DELETE FROM login_attempts WHERE key=?",(key,))
         audit("login","users",user["id"])
         db().commit()
-        return jsonify(csrf=session["csrf"],user={k:user[k] for k in ("id","name","username","role","patient_id")})
+        return jsonify(token=token,token_type="Bearer",expires_in=int(lifetime()),csrf=session["csrf"],user={k:user[k] for k in ("id","name","username","role","patient_id")})
 
     @app.post("/api/logout")
     def logout():
-        audit("logout","users",session.get("uid"))
+        audit("logout","users",g.user["id"])
+        revoke_session()
         db().commit()
-        session.clear()
         return jsonify(ok=True)
 
     @app.get("/api/meta")

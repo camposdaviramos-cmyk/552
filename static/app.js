@@ -38,6 +38,14 @@ const icons = {
 };
 const icon=(name,cls='')=>`<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]||icons.clipboard}</svg>`;
 const state={csrf:'',user:null,meta:{modules:{},units:[],professionals:[]},patients:[],records:[],route:'dashboard',page:1,query:'',status:'',unit:'',days:30,demo:true,requestId:0};
+// Vercel serves the UI; authentication and data always use the Render API.
+const API_BASE=location.hostname.endsWith('.vercel.app')?'https://five52-9ftx.onrender.com/api':'/api';
+const AUTH_STORAGE='integra.auth.v1';
+let authToken='';
+try{authToken=sessionStorage.getItem(AUTH_STORAGE)||'';}catch(error){/* Memory-only fallback when storage is unavailable. */}
+function saveToken(token){authToken=token||'';try{if(authToken)sessionStorage.setItem(AUTH_STORAGE,authToken);else sessionStorage.removeItem(AUTH_STORAGE);}catch(error){}}
+function clearAuth(){saveToken('');state.user=null;state.csrf='';state.patients=[];state.records=[];state.meta={modules:{},units:[],professionals:[]};state.requestId++;stopCitizenEvents();$('#modal')?.close();}
+function authHeaders(extra={}){const headers=new Headers(extra);if(state.csrf)headers.set('X-CSRF-Token',state.csrf);if(authToken)headers.set('Authorization','Bearer '+authToken);return headers;}
 const fmtDate=v=>v?new Date(String(v).length===10?v+'T12:00:00':v).toLocaleDateString('pt-BR'):'—';
 const fmtMoney=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const initials=v=>(v||'').split(' ').filter(Boolean).slice(0,2).map(x=>x[0]).join('');
@@ -45,14 +53,16 @@ const unitName=id=>state.meta.units.find(u=>u.id==id)?.name||'—';
 const patientName=id=>state.patients.find(p=>p.id==id)?.name||`Paciente #${id}`;
 function toast(message,error=false){const el=$('#toast');el.textContent=message;el.className='show '+(error?'error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.className='',5000);}
 async function api(path,options={}){
-  const {timeoutMs=30000,...requestOptions}=options;
-  const headers={'X-CSRF-Token':state.csrf,...requestOptions.headers};
-  if(requestOptions.body && !(requestOptions.body instanceof FormData)){headers['Content-Type']='application/json';requestOptions.body=JSON.stringify(requestOptions.body);}
+  const {timeoutMs=30000,responseType='json',...requestOptions}=options;
+  const tokenAtStart=authToken;
+  const headers=authHeaders(requestOptions.headers);
+  if(requestOptions.body && !(requestOptions.body instanceof FormData)){headers.set('Content-Type','application/json');requestOptions.body=JSON.stringify(requestOptions.body);}
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const response=await fetch('/api'+path,{...requestOptions,credentials:'include',headers,signal:controller.signal});
-    if(response.status===401 && path!='/login'){state.user=null;renderLogin();}
+    const response=await fetch(API_BASE+path,{...requestOptions,credentials:'include',headers,signal:controller.signal});
+    if(response.status===401 && path!='/login' && authToken===tokenAtStart){clearAuth();renderLogin();}
+    if(response.ok && responseType==='blob')return {blob:await response.blob(),disposition:response.headers.get('Content-Disposition')||''};
     const data=await response.json().catch(error=>{if(controller.signal.aborted)throw error;throw new Error('O servidor retornou uma resposta inválida. Tente novamente.');});
     if(!response.ok)throw new Error(data.error||'Não foi possível completar a operação.');
     return data;
@@ -62,6 +72,18 @@ async function api(path,options={}){
     throw error;
   }finally{clearTimeout(timeout);}
 }
+// API links must use fetch too: native navigation cannot attach a Bearer header.
+document.addEventListener('click',async event=>{
+  const link=event.target.closest('a[href^="/api/"]');if(!link)return;
+  event.preventDefault();
+  try{
+    const {blob,disposition}=await api(link.getAttribute('href').slice(4),{responseType:'blob'});
+    const url=URL.createObjectURL(blob);const download=document.createElement('a');download.href=url;
+    const filename=disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    download.download=link.getAttribute('download')||filename||link.pathname.split('/').pop()||'documento';
+    document.body.append(download);download.click();download.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(error){toast(error.message,true);}
+});
 function badge(status){const good=['Concluído','Conferido','Confirmado','Finalizado','Laudado','Ativo','Disponível','Alta','Lida'];const bad=['Urgente','Crítica','Rejeitado','Cancelado','Faltou','Bloqueado','Indeferido','Dependência externa','Não homologada'];return `<span class="badge ${good.includes(status)?'green':bad.includes(status)?'red':'amber'}"><i></i>${esc(status)}</span>`;}
 function navLink(key,title,ico){return `<a class="nav-link ${state.route===key?'active':''}" href="#${key}" title="${esc(title)}">${icon(ico)}<span>${esc(title)}</span>${state.route===key?'<span class="nav-marker"></span>':''}</a>`;}
 function renderLogin(){
@@ -71,7 +93,7 @@ function renderLogin(){
   const setTab=()=>document.querySelectorAll('[data-login]').forEach(b=>b.classList.toggle('selected',b.dataset.login===(citizen?'citizen':'team')));setTab();
   document.querySelectorAll('[data-login]').forEach(b=>b.onclick=()=>{citizen=b.dataset.login==='citizen';setTab();});
   $('#demo-access')?.addEventListener('click',()=>{$('[name=username]').value=citizen?'cidadao':'admin';$('[name=password]').value='Demo@Saude2026!';$('#login-form').requestSubmit();});
-  $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('button[type=submit]',e.target);button.disabled=true;$('#login-error').textContent='';try{const sessionData=await api('/session');state.csrf=sessionData.csrf;const data=await api('/login',{method:'POST',body:Object.fromEntries(new FormData(e.target))});state.csrf=data.csrf;state.user=data.user;await enterApp();}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
+  $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('button[type=submit]',e.target);button.disabled=true;$('#login-error').textContent='';try{const sessionData=await api('/session');state.csrf=sessionData.csrf;const data=await api('/login',{method:'POST',body:Object.fromEntries(new FormData(e.target))});saveToken(data.token);state.csrf=data.csrf;state.user=data.user;await enterApp();}catch(err){const error=$('#login-error');if(error)error.textContent=err.message;else toast(err.message,true);}finally{button.disabled=false;}};
 }
 function shell(){
   const managerial=['admin','gestor'].includes(state.user.role);
@@ -88,10 +110,10 @@ function shell(){
   $('#mobile-menu').onclick=()=>$('.sidebar').classList.toggle('open');
   $('#user-menu').onclick=()=>openModal('Minha conta',`<div class="account-card"><span class="avatar large">${esc(initials(state.user.name))}</span><h3>${esc(state.user.name)}</h3><p>${esc(state.meta.roles[state.user.role])}</p><p class="muted">Usuário: ${esc(state.user.username)}</p></div><button class="btn full" id="logout">${icon('logout')} Sair da conta</button>`,()=>{$('#logout').onclick=logout;});
 }
-async function logout(){stopCitizenEvents();await api('/logout',{method:'POST'});$('#modal').close();state.user=null;const s=await api('/session');state.csrf=s.csrf;renderLogin();}
+async function logout(){try{await api('/logout',{method:'POST'});clearAuth();renderLogin();}catch(error){toast(error.message,true);}}
 async function enterApp(){
   if(state.user.role==='cidadao'){await renderCitizen();return;}
-  const [meta,patients]=await Promise.all([api('/meta'),api('/patients')]);state.meta=meta;state.patients=patients.items;shell();await route();
+  const account=state.user;const [meta,patients]=await Promise.all([api('/meta'),api('/patients')]);if(state.user!==account)return;state.meta=meta;state.patients=patients.items;shell();await route();
 }
 function pageHeader(eyebrow,title,description,actions=''){return `<div class="page-heading"><div><div class="eyebrow">${eyebrow}</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div><div class="heading-actions">${actions}</div></div>`;}
 function updateNav(){document.querySelectorAll('.nav-link').forEach(a=>a.classList.toggle('active',a.hash==='#'+state.route));$('.sidebar')?.classList.remove('open');}
@@ -244,5 +266,5 @@ async function renderCitizen(){
 }
 window.addEventListener('hashchange',route);
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&state.user?.role!=='cidadao'&&state.user){e.preventDefault();patientSearch();}});
-setInterval(()=>{if(state.user?.role==='cidadao'&&!document.hidden&&!$('#modal').open&&citizenEvents?.readyState!==EventSource.OPEN)renderCitizen();},10000);
-(async()=>{try{const s=await api('/session');state.csrf=s.csrf;state.user=s.user;state.demo=s.demo;if(state.user)await enterApp();else renderLogin();}catch(err){$('#app').innerHTML=`<main class="error-panel"><h1>Integra Saúde</h1><p>${esc(err.message)}</p><p>Verifique se o servidor está em execução.</p></main>`;}})();
+setInterval(()=>{if(state.user?.role==='cidadao'&&!document.hidden&&!$('#modal').open&&!citizenEvents?.connected)renderCitizen();},10000);
+(async()=>{try{const s=await api('/session');state.csrf=s.csrf;state.user=s.user;state.demo=s.demo;if(state.user)await enterApp();else{saveToken('');renderLogin();}}catch(err){if($('#login-form'))return;$('#app').innerHTML=`<main class="error-panel"><h1>Integra Saúde</h1><p>${esc(err.message)}</p><p>Verifique se o servidor está em execução.</p></main>`;}})();
